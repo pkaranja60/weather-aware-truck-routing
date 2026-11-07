@@ -202,4 +202,4 @@ def list_queries_view(request: Request) -> Response:
 
 @api_view(["GET"])
 def health_check(request: Request) -> Response:
-    return Response({"status": "ok", "service": "Spotter AI Route Planner API"})
+    return Response({"status": "ok", "service": "Route Planner API"})
