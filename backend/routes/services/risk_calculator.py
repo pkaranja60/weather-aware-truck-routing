@@ -169,9 +169,9 @@ def route_overall_risk(checkpoints: list[dict]) -> str:
 def pick_recommended_route(routes: list[dict]) -> int:
     """
     Given a list of route dicts, return the route_id of the recommended route:
-      1. Fewest Severe miles / checkpoints
-      2. Fewest High miles / checkpoints
-      3. Lowest average risk score
+      1. Fewest Severe checkpoints / miles
+      2. Fewest High checkpoints / miles
+      3. Fewest Moderate checkpoints / lowest binned risk
       4. Shortest travel time (duration_hours)
     """
 
@@ -179,12 +179,19 @@ def pick_recommended_route(routes: list[dict]) -> int:
         cps = r.get("checkpoints", [])
         severe_count = sum(1 for cp in cps if cp.get("risk_level") == "Severe")
         high_count = sum(1 for cp in cps if cp.get("risk_level") == "High")
+        moderate_count = sum(1 for cp in cps if cp.get("risk_level") == "Moderate")
         avg_risk = (
             sum(_level_index(cp.get("risk_level", "Low")) for cp in cps) / len(cps)
             if cps
             else 0.0
         )
-        return (severe_count, high_count, avg_risk, r.get("duration_hours", 0.0))
+        return (
+            severe_count,
+            high_count,
+            moderate_count,
+            round(avg_risk, 1),
+            r.get("duration_hours", 0.0),
+        )
 
     best = min(routes, key=sort_key)
     return best["route_id"]
