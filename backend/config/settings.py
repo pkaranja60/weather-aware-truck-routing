@@ -30,7 +30,16 @@ SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-spotter-dev-key")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", "True") == "True"
 
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1,*").split(",")
+raw_hosts = os.getenv(
+    "ALLOWED_HOSTS", "localhost,127.0.0.1,.onrender.com,*"
+)
+ALLOWED_HOSTS = [
+    h.strip().replace("https://", "").replace("http://", "").split("/")[0]
+    for h in raw_hosts.split(",")
+    if h.strip()
+]
+
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 
 # Application definition
