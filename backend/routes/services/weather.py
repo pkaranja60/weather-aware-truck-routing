@@ -1,11 +1,30 @@
 """
 Weather Service
-Fetches hourly weather forecasts from Open-Meteo with parallel snapped-coordinate deduplication.
+===============
+Fetches hourly weather forecasts from Open-Meteo (free, no API key).
+
+Rate-limit safety (important on shared hosting like Render):
+  - MAX_WORKERS = 4         — bounded concurrency on shared Render IPs
+  - Retry up to 3×          — exponential back-off on 429 (1 → 2 → 4 seconds)
+  - Per-request dedup       — coord_groups: round(lat,2) ≈ 1 km grid so the
+                              3 route alternatives sharing a corridor only
+                              fire once per unique grid cell per request
+  - Cross-request cache     — 30-min TTL keyed on round(lat,2)/round(lon,2);
+                              successive requests (multiple users, page
+                              refreshes) skip Open-Meteo entirely for
+                              recently-fetched locations
+
+Variables fetched per location:
+  windspeed_10m   km/h  → mph
+  precipitation   mm/hr → in/hr
+  snowfall        cm/hr → in/hr
+  weathercode     WMO code
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
@@ -15,43 +34,125 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-KMH_TO_MPH, MM_TO_IN, CM_TO_IN = 0.621371, 0.0393701, 0.393701
+KMH_TO_MPH = 0.621371
+MM_TO_IN = 0.0393701
+CM_TO_IN = 0.393701
 
 HOURLY_PARAMS = {
     "hourly": "windspeed_10m,precipitation,snowfall,weathercode",
     "windspeed_unit": "kmh",
-    "forecast_days": 7,
+    "forecast_days": 7,  # 7 days covers departures planned up to a week out
     "timezone": "UTC",
 }
 
+# ── Concurrency / retry / cache settings ─────────────────────────────────────
+
 MAX_WORKERS = 4
-WEATHER_TIMEOUT = 10
+WEATHER_TIMEOUT = 10  # seconds per request
+MAX_RETRIES = 3  # retry attempts on 429 / connection error
+RETRY_WAIT = [1.0, 2.0, 4.0]  # seconds to wait before each retry
+
+CACHE_TTL = 1800  # 30-minute response cache
+# Key: (round(lat,2), round(lon,2)) — matches the coord-group snapping below
+# Value: (timestamp_stored, raw_json_dict)
+_cache: dict[tuple[float, float], tuple[float, dict]] = {}
+_cache_lock = threading.Lock()
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Cache helpers ─────────────────────────────────────────────────────────────
+
+
+def _cache_key(lat: float, lon: float) -> tuple[float, float]:
+    return (round(lat, 2), round(lon, 2))
+
+
+def _cache_get(lat: float, lon: float) -> dict | None:
+    key = _cache_key(lat, lon)
+    with _cache_lock:
+        entry = _cache.get(key)
+    if entry is None:
+        return None
+    stored_at, data = entry
+    if time.monotonic() - stored_at > CACHE_TTL:
+        with _cache_lock:
+            _cache.pop(key, None)
+        return None
+    return data
+
+
+def _cache_set(lat: float, lon: float, data: dict) -> None:
+    key = _cache_key(lat, lon)
+    with _cache_lock:
+        _cache[key] = (time.monotonic(), data)
+
+
+# ── Low-level fetch ───────────────────────────────────────────────────────────
 
 
 def _fetch_open_meteo(lat: float, lon: float) -> dict:
+    """Fetch raw JSON from Open-Meteo, using the cache when available."""
+    cached = _cache_get(lat, lon)
+    if cached is not None:
+        return cached
+
     params = {"latitude": lat, "longitude": lon, **HOURLY_PARAMS}
-    for attempt in range(2):
+
+    for attempt in range(MAX_RETRIES + 1):
         try:
             resp = requests.get(
                 settings.OPEN_METEO_URL,
                 params=params,
                 timeout=WEATHER_TIMEOUT,
             )
-            if resp.status_code == 429 and attempt == 0:
-                time.sleep(1.2)
-                continue
+            if resp.status_code == 429:
+                if attempt < MAX_RETRIES:
+                    wait = RETRY_WAIT[attempt]
+                    logger.warning(
+                        "Open-Meteo 429 for (%.2f, %.2f) — retrying in %.1fs (attempt %d/%d)",
+                        lat,
+                        lon,
+                        wait,
+                        attempt + 1,
+                        MAX_RETRIES,
+                    )
+                    time.sleep(wait)
+                    continue
+                logger.error(
+                    "Open-Meteo rate-limited for (%.2f, %.2f) after %d retries",
+                    lat,
+                    lon,
+                    MAX_RETRIES,
+                )
+                return {}
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+            _cache_set(lat, lon, data)
+            return data
+
         except requests.RequestException as exc:
-            if attempt == 0:
-                time.sleep(0.5)
+            if attempt < MAX_RETRIES:
+                wait = RETRY_WAIT[attempt]
+                logger.warning(
+                    "Open-Meteo fetch failed for (%.2f, %.2f): %s — retrying in %.1fs",
+                    lat,
+                    lon,
+                    exc,
+                    wait,
+                )
+                time.sleep(wait)
                 continue
-            logger.warning("Open-Meteo fetch failed for (%s, %s): %s", lat, lon, exc)
+            logger.warning(
+                "Open-Meteo fetch failed for (%.2f, %.2f): %s",
+                lat,
+                lon,
+                exc,
+            )
             return {}
+
     return {}
+
+
+# ── Parsing helpers ───────────────────────────────────────────────────────────
 
 
 def _parse_hourly(data: dict) -> dict:
@@ -79,13 +180,15 @@ def _closest_index(times: list[str], target_iso: str) -> int:
 
 def _zero_weather() -> dict:
     return {
-        "wind_speed_mph": 0.0, "precipitation_in_hr": 0.0,
-        "snowfall_in_hr": 0.0, "weathercode": 0,
+        "wind_speed_mph": 0.0,
+        "precipitation_in_hr": 0.0,
+        "snowfall_in_hr": 0.0,
+        "weathercode": 0,
     }
 
 
 def _extract_at_index(hourly: dict, idx: int) -> dict:
-    def _get(key: float, default=0.0):
+    def _get(key: str, default: float = 0.0):
         arr = hourly.get(key, [])
         val = arr[idx] if idx < len(arr) else None
         return val if val is not None else default
@@ -118,18 +221,22 @@ def get_checkpoint_weather(lat: float, lon: float, eta_iso: str) -> dict:
 
 def get_route_forecast_48h(lat: float, lon: float, departure_iso: str) -> list[dict]:
     """
-    Fetch 0-48hr hourly forecast for the route origin.
-    Used by the frontend slider.
+    Fetch 0–48 hr hourly forecast for the route origin.
+    Used by the frontend slider. Extrapolates past the forecast window
+    by repeating the last available values with synthetic timestamps.
     """
     data = _fetch_open_meteo(lat, lon)
     hourly = _parse_hourly(data)
+
     if not hourly["time"]:
         dep_clean = departure_iso.replace("Z", "+00:00")
         dep_dt = datetime.fromisoformat(dep_clean)
         return [
             {
                 "hour_offset": offset,
-                "time_iso": (dep_dt + timedelta(hours=offset)).strftime("%Y-%m-%dT%H:%M"),
+                "time_iso": (dep_dt + timedelta(hours=offset)).strftime(
+                    "%Y-%m-%dT%H:%M"
+                ),
                 **_zero_weather(),
             }
             for offset in range(49)
@@ -138,6 +245,7 @@ def get_route_forecast_48h(lat: float, lon: float, departure_iso: str) -> list[d
     dep_idx = _closest_index(hourly["time"], departure_iso)
     result = []
     max_idx = len(hourly["time"]) - 1
+
     for offset in range(49):
         target_idx = dep_idx + offset
         idx = min(target_idx, max_idx)
@@ -146,27 +254,30 @@ def get_route_forecast_48h(lat: float, lon: float, departure_iso: str) -> list[d
         if target_idx <= max_idx:
             time_iso = hourly["time"][idx]
         else:
+            # Extrapolate timestamps beyond forecast window
             last_dt = datetime.fromisoformat(hourly["time"][max_idx])
             extrapolated_dt = last_dt + timedelta(hours=(target_idx - max_idx))
             time_iso = extrapolated_dt.strftime("%Y-%m-%dT%H:%M")
 
-        result.append(
-            {
-                "hour_offset": offset,
-                "time_iso": time_iso,
-                **wx,
-            }
-        )
+        result.append({"hour_offset": offset, "time_iso": time_iso, **wx})
+
     return result
 
 
 def enrich_checkpoints_with_weather(checkpoints: list[dict]) -> list[dict]:
     """
-    Deduplicate by snapped coordinates, fetch in parallel, and enrich checkpoints.
+    Deduplicate checkpoints by snapped coordinates, fetch in parallel,
+    then apply weather to every checkpoint.
+
+    Snapping to round(lat,2) / round(lon,2) (~1 km grid) means the three
+    route alternatives sharing a corridor only fire once per grid cell,
+    cutting API calls by up to 3×.  The cross-request cache (_fetch_open_meteo)
+    further eliminates redundant fetches across successive plan_routes calls.
     """
     if not checkpoints:
         return checkpoints
 
+    # Group checkpoints by snapped coordinate key
     coord_groups: dict[tuple[float, float], list[dict]] = {}
     for cp in checkpoints:
         key = (round(cp["lat"], 2), round(cp["lon"], 2))
@@ -176,6 +287,7 @@ def enrich_checkpoints_with_weather(checkpoints: list[dict]) -> list[dict]:
         data = _fetch_open_meteo(key[0], key[1])
         return key, _parse_hourly(data)
 
+    # Parallel fetch — only unique grid cells
     coord_data: dict[tuple[float, float], dict] = {}
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         futures = [pool.submit(_fetch_coord, k) for k in coord_groups]
@@ -186,6 +298,7 @@ def enrich_checkpoints_with_weather(checkpoints: list[dict]) -> list[dict]:
             except Exception as exc:
                 logger.warning("Coord weather fetch failed: %s", exc)
 
+    # Apply hourly data to every checkpoint in each group
     for key, cps in coord_groups.items():
         hourly = coord_data.get(key, {})
         has_times = bool(hourly.get("time"))
