@@ -59,6 +59,10 @@ export function ResultsPage({ queryId, onNavigateHome }: ResultsPageProps) {
     data.routes.find((r: Route) => r.route_id === selectedRoute) ??
     data.routes[0];
 
+  const recommendedRoute =
+    data.routes.find((r: Route) => r.route_id === data.recommended_route_id) ??
+    data.routes[0];
+
   return (
     <div className="flex h-screen flex-col bg-slate-50">
       <header className="flex items-center justify-between border-b bg-white px-4 py-3 shadow-sm">
@@ -85,11 +89,27 @@ export function ResultsPage({ queryId, onNavigateHome }: ResultsPageProps) {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 text-sm">
-          <span className="hidden text-slate-500 sm:inline">Recommended:</span>
-          <span className="font-medium">Route {data.recommended_route_id}</span>
-          {activeRoute ? (
-            <RiskBadge level={activeRoute.overall_risk_level} />
+        <div className="flex items-center gap-3 text-sm">
+          <div className="flex items-center gap-1.5">
+            <span className="hidden text-slate-500 sm:inline">
+              Recommended:
+            </span>
+            <span className="font-medium">
+              Route {data.recommended_route_id}
+            </span>
+            {recommendedRoute ? (
+              <RiskBadge level={recommendedRoute.overall_risk_level} />
+            ) : null}
+          </div>
+
+          {activeRoute && activeRoute.route_id !== data.recommended_route_id ? (
+            <div className="flex items-center gap-1.5 border-l pl-3 text-slate-500">
+              <span className="hidden sm:inline">Viewing:</span>
+              <span className="font-medium text-slate-700">
+                Route {activeRoute.route_id}
+              </span>
+              <RiskBadge level={activeRoute.overall_risk_level} />
+            </div>
           ) : null}
         </div>
       </header>
