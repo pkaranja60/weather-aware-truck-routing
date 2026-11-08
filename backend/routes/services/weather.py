@@ -3,16 +3,22 @@ Weather Service
 ===============
 Fetches hourly weather forecasts from Open-Meteo (free, no API key).
 
-Rate-limit safety (important on shared hosting like Render):
-  - MAX_WORKERS = 4         — bounded concurrency on shared Render IPs
-  - Retry up to 3×          — exponential back-off on 429 (1 → 2 → 4 seconds)
+Rate-limit safety (critical on shared hosting like Render):
+  - MAX_WORKERS = 2         — 2 concurrent threads max (reduce burst)
+  - _fetch_lock + 300ms gap — global serializer; never fires 2 requests
+                              closer than 300ms apart → ~3 req/sec ceiling
+  - FAIL-FAST on 429        — returns {} immediately, no retry; workers die
+                              if retries stack up past Gunicorn's 30s timeout
+  - 1 retry on network err  — transient TCP resets still get a second chance
   - Per-request dedup       — coord_groups: round(lat,2) ≈ 1 km grid so the
                               3 route alternatives sharing a corridor only
                               fire once per unique grid cell per request
   - Cross-request cache     — 30-min TTL keyed on round(lat,2)/round(lon,2);
                               successive requests (multiple users, page
-                              refreshes) skip Open-Meteo entirely for
-                              recently-fetched locations
+                              refreshes) skip Open-Meteo entirely → 0 API calls
+
+Worst-case timing (20 unique cells, all 429 — no cache):
+  20 × 300ms = 6s   → well inside Gunicorn 30s worker timeout
 
 Variables fetched per location:
   windspeed_10m   km/h  → mph
@@ -47,16 +53,23 @@ HOURLY_PARAMS = {
 
 # ── Concurrency / retry / cache settings ─────────────────────────────────────
 
-MAX_WORKERS = 4
-WEATHER_TIMEOUT = 10  # seconds per request
-MAX_RETRIES = 3  # retry attempts on 429 / connection error
-RETRY_WAIT = [1.0, 2.0, 4.0]  # seconds to wait before each retry
+MAX_WORKERS = 2  # 2 threads max — reduces burst on shared IPs
+WEATHER_TIMEOUT = 8  # seconds per request (tight — fail fast)
+REQUEST_GAP = 0.30  # min seconds between consecutive API calls
+
+# Retry only on network errors (connection reset, DNS, etc.) — NOT on 429.
+# Retrying 429 is what killed the Gunicorn worker: 20 coords × 7s retries = 140s.
+NET_RETRY_WAIT = 0.5  # one retry, 500ms, for transient TCP errors
 
 CACHE_TTL = 1800  # 30-minute response cache
 # Key: (round(lat,2), round(lon,2)) — matches the coord-group snapping below
 # Value: (timestamp_stored, raw_json_dict)
 _cache: dict[tuple[float, float], tuple[float, dict]] = {}
 _cache_lock = threading.Lock()
+
+# Serialises actual HTTP calls so bursts stay ≤ 1/REQUEST_GAP req/sec globally
+_fetch_lock = threading.Lock()
+_last_fetch_ts = 0.0  # monotonic time of the last outbound request
 
 
 # ── Cache helpers ─────────────────────────────────────────────────────────────
@@ -90,56 +103,69 @@ def _cache_set(lat: float, lon: float, data: dict) -> None:
 
 
 def _fetch_open_meteo(lat: float, lon: float) -> dict:
-    """Fetch raw JSON from Open-Meteo, using the cache when available."""
+    """
+    Fetch raw JSON from Open-Meteo, using the cache when available.
+
+    429 handling: return {} immediately — no retry.
+    Retrying 429 on a shared Render IP is fatal: 20 coords × 7s backoff = 140s,
+    which kills the Gunicorn worker.  The 30-min cache means the NEXT request
+    for the same location is free, so the app self-heals within one retry.
+
+    Network error handling: one retry after 500ms for transient TCP errors.
+    """
+    global _last_fetch_ts
+
     cached = _cache_get(lat, lon)
     if cached is not None:
         return cached
 
     params = {"latitude": lat, "longitude": lon, **HOURLY_PARAMS}
 
-    for attempt in range(MAX_RETRIES + 1):
+    # ── Enforce minimum gap between outbound HTTP calls ──────────────────────
+    # The lock + sleep keeps all threads (across MAX_WORKERS) from firing
+    # requests closer than REQUEST_GAP seconds apart.  Cache hits skip this
+    # block entirely, so the limiter only applies to actual API calls.
+    with _fetch_lock:
+        now = time.monotonic()
+        elapsed = now - _last_fetch_ts
+        if elapsed < REQUEST_GAP:
+            time.sleep(REQUEST_GAP - elapsed)
+        _last_fetch_ts = time.monotonic()
+
+    for attempt in range(2):  # attempt 0 = first try; attempt 1 = one retry
         try:
             resp = requests.get(
                 settings.OPEN_METEO_URL,
                 params=params,
                 timeout=WEATHER_TIMEOUT,
             )
+
             if resp.status_code == 429:
-                if attempt < MAX_RETRIES:
-                    wait = RETRY_WAIT[attempt]
-                    logger.warning(
-                        "Open-Meteo 429 for (%.2f, %.2f) — retrying in %.1fs (attempt %d/%d)",
-                        lat,
-                        lon,
-                        wait,
-                        attempt + 1,
-                        MAX_RETRIES,
-                    )
-                    time.sleep(wait)
-                    continue
-                logger.error(
-                    "Open-Meteo rate-limited for (%.2f, %.2f) after %d retries",
+                # FAIL FAST — do NOT retry; blocking here causes worker timeout
+                logger.warning(
+                    "Open-Meteo 429 for (%.2f, %.2f) — returning zero weather "
+                    "(cached routes will be unaffected on next request)",
                     lat,
                     lon,
-                    MAX_RETRIES,
                 )
                 return {}
+
             resp.raise_for_status()
             data = resp.json()
             _cache_set(lat, lon, data)
             return data
 
         except requests.RequestException as exc:
-            if attempt < MAX_RETRIES:
-                wait = RETRY_WAIT[attempt]
+            if attempt == 0:
+                # One retry for transient network errors (TCP reset, DNS, etc.)
                 logger.warning(
-                    "Open-Meteo fetch failed for (%.2f, %.2f): %s — retrying in %.1fs",
+                    "Open-Meteo network error for (%.2f, %.2f): %s — retrying in %.1fs",
                     lat,
                     lon,
                     exc,
-                    wait,
+                    NET_RETRY_WAIT,
                 )
-                time.sleep(wait)
+                time.sleep(NET_RETRY_WAIT)
                 continue
             logger.warning(
                 "Open-Meteo fetch failed for (%.2f, %.2f): %s",
