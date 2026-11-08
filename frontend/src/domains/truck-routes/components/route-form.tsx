@@ -1,3 +1,4 @@
+import { Loader2 } from "lucide-react";
 import type React from "react";
 import { useCallback, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -163,7 +164,14 @@ export function RouteForm({ onSuccess }: RouteFormProps) {
       ) : null}
 
       <Button className="w-full" disabled={loading} type="submit">
-        {loading ? "Planning route…" : "Plan Route"}
+        {loading ? (
+          <>
+            <Loader2 className="size-4 animate-spin" />
+            <span>Planning route…</span>
+          </>
+        ) : (
+          "Plan Route"
+        )}
       </Button>
 
       {loading ? (
