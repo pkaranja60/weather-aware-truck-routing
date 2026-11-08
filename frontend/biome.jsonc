@@ -4,5 +4,15 @@
     "ultracite/biome/core",
     "ultracite/biome/react",
     "ultracite/biome/tanstack"
-  ]
+  ],
+  "linter": {
+    "rules": {
+      "performance": {
+        "noBarrelFile": "off"
+      },
+      "a11y": {
+        "noLabelWithoutControl": "off"
+      }
+    }
+  }
 }
