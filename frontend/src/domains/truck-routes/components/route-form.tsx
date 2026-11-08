@@ -99,10 +99,13 @@ export function RouteForm({ onSuccess }: RouteFormProps) {
         <Input
           id="origin"
           onChange={handleOriginChange}
-          placeholder="e.g. Chicago, IL"
+          placeholder="e.g. Los Angeles, CA"
           required
           value={origin}
         />
+        <p className="text-muted-foreground text-xs">
+          Include city and state for best results
+        </p>
       </div>
 
       <div className="space-y-1.5">
@@ -110,7 +113,7 @@ export function RouteForm({ onSuccess }: RouteFormProps) {
         <Input
           id="destination"
           onChange={handleDestinationChange}
-          placeholder="e.g. Columbus, OH"
+          placeholder="e.g. Oakland, CA"
           required
           value={destination}
         />
