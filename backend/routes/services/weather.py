@@ -1,21 +1,12 @@
 """
 Weather Service
-===============
-Fetches hourly weather forecasts from Open-Meteo (free, no API key).
-
-All checkpoint weather calls are made in PARALLEL using ThreadPoolExecutor
-so 37 checkpoints take ~3 seconds instead of ~37 × 15 seconds.
-
-Variables fetched per location:
-  windspeed_10m   km/h  → mph
-  precipitation   mm/hr → in/hr
-  snowfall        cm/hr → in/hr
-  weathercode     WMO code
+Fetches hourly weather forecasts from Open-Meteo with parallel snapped-coordinate deduplication.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 
@@ -31,13 +22,11 @@ CM_TO_IN = 0.393701
 HOURLY_PARAMS = {
     "hourly": "windspeed_10m,precipitation,snowfall,weathercode",
     "windspeed_unit": "kmh",
-    "forecast_days": 16,
+    "forecast_days": 7,
     "timezone": "UTC",
 }
 
-# Max parallel weather requests — keeps Open-Meteo happy
-MAX_WORKERS = 8
-# Per-request timeout — shorter to fail fast rather than block forever
+MAX_WORKERS = 4
 WEATHER_TIMEOUT = 10
 
 
@@ -46,17 +35,25 @@ WEATHER_TIMEOUT = 10
 
 def _fetch_open_meteo(lat: float, lon: float) -> dict:
     params = {"latitude": lat, "longitude": lon, **HOURLY_PARAMS}
-    try:
-        resp = requests.get(
-            settings.OPEN_METEO_URL,
-            params=params,
-            timeout=WEATHER_TIMEOUT,
-        )
-        resp.raise_for_status()
-        return resp.json()
-    except requests.RequestException as exc:
-        logger.warning("Open-Meteo fetch failed for (%s, %s): %s", lat, lon, exc)
-        return {}
+    for attempt in range(2):
+        try:
+            resp = requests.get(
+                settings.OPEN_METEO_URL,
+                params=params,
+                timeout=WEATHER_TIMEOUT,
+            )
+            if resp.status_code == 429 and attempt == 0:
+                time.sleep(1.2)
+                continue
+            resp.raise_for_status()
+            return resp.json()
+        except requests.RequestException as exc:
+            if attempt == 0:
+                time.sleep(0.5)
+                continue
+            logger.warning("Open-Meteo fetch failed for (%s, %s): %s", lat, lon, exc)
+            return {}
+    return {}
 
 
 def _parse_hourly(data: dict) -> dict:
@@ -160,27 +157,38 @@ def get_route_forecast_48h(lat: float, lon: float, departure_iso: str) -> list[d
 
 def enrich_checkpoints_with_weather(checkpoints: list[dict]) -> list[dict]:
     """
-    Fetch weather for every checkpoint IN PARALLEL.
-    Falls back to zero-weather on any timeout/error so the route still returns.
+    Deduplicate by snapped coordinates, fetch in parallel, and enrich checkpoints.
     """
     if not checkpoints:
         return checkpoints
 
-    def _fetch_one(idx: int, cp: dict) -> tuple[int, dict]:
-        wx = get_checkpoint_weather(cp["lat"], cp["lon"], cp["eta_iso"])
-        return idx, wx
+    coord_groups: dict[tuple[float, float], list[dict]] = {}
+    for cp in checkpoints:
+        key = (round(cp["lat"], 2), round(cp["lon"], 2))
+        coord_groups.setdefault(key, []).append(cp)
 
+    def _fetch_coord(key: tuple[float, float]) -> tuple[tuple[float, float], dict]:
+        data = _fetch_open_meteo(key[0], key[1])
+        return key, _parse_hourly(data)
+
+    coord_data: dict[tuple[float, float], dict] = {}
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        futures = {
-            pool.submit(_fetch_one, i, cp): i for i, cp in enumerate(checkpoints)
-        }
+        futures = [pool.submit(_fetch_coord, k) for k in coord_groups]
         for future in as_completed(futures):
             try:
-                idx, wx = future.result()
-                checkpoints[idx].update(wx)
+                key, hourly = future.result()
+                coord_data[key] = hourly
             except Exception as exc:
-                i = futures[future]
-                logger.warning("Weather fetch failed for checkpoint %d: %s", i, exc)
-                checkpoints[i].update(_zero_weather())
+                logger.warning("Coord weather fetch failed: %s", exc)
+
+    for key, cps in coord_groups.items():
+        hourly = coord_data.get(key, {})
+        has_times = bool(hourly.get("time"))
+        for cp in cps:
+            if not has_times:
+                cp.update(_zero_weather())
+            else:
+                idx = _closest_index(hourly["time"], cp["eta_iso"])
+                cp.update(_extract_at_index(hourly, idx))
 
     return checkpoints

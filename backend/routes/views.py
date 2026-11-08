@@ -51,14 +51,13 @@ def _save_query(
         recommended_route_id=rec_id,
     )
 
-    for r in routes_with_risk:
-        # 0-48hr forecast for this route's origin point
-        forecast = get_route_forecast_48h(
-            origin_geo["lat"],
-            origin_geo["lon"],
-            validated_data["departure_datetime"].isoformat(),
-        )
+    origin_forecast = get_route_forecast_48h(
+        origin_geo["lat"],
+        origin_geo["lon"],
+        validated_data["departure_datetime"].isoformat(),
+    )
 
+    for r in routes_with_risk:
         route_obj = Route.objects.create(
             query=query,
             route_id=r["route_id"],
@@ -67,31 +66,30 @@ def _save_query(
             geometry=r["geometry"],
             overall_risk_level=r["overall_risk_level"],
             is_recommended=(r["route_id"] == rec_id),
-            forecast_48h=forecast,
+            forecast_48h=origin_forecast,
         )
 
-        cp_objs = []
-        for idx, cp in enumerate(r["checkpoints"]):
-            cp_objs.append(
-                Checkpoint(
-                    route=route_obj,
-                    index=idx,
-                    distance_from_start_miles=cp["distance_from_start_miles"],
-                    distance_to_end_miles=cp["distance_to_end_miles"],
-                    lat=cp["lat"],
-                    lon=cp["lon"],
-                    eta_iso=cp["eta_iso"],
-                    hours_from_departure=cp["hours_from_departure"],
-                    wind_speed_mph=cp.get("wind_speed_mph", 0.0),
-                    precipitation_in_hr=cp.get("precipitation_in_hr", 0.0),
-                    snowfall_in_hr=cp.get("snowfall_in_hr", 0.0),
-                    weathercode=cp.get("weathercode", 0),
-                    wind_risk=cp.get("wind_risk", "Low"),
-                    rain_risk=cp.get("rain_risk", "Low"),
-                    snow_risk=cp.get("snow_risk", "Low"),
-                    risk_level=cp.get("risk_level", "Low"),
-                )
+        cp_objs = [
+            Checkpoint(
+                route=route_obj,
+                index=idx,
+                distance_from_start_miles=cp["distance_from_start_miles"],
+                distance_to_end_miles=cp["distance_to_end_miles"],
+                lat=cp["lat"],
+                lon=cp["lon"],
+                eta_iso=cp["eta_iso"],
+                hours_from_departure=cp["hours_from_departure"],
+                wind_speed_mph=cp.get("wind_speed_mph", 0.0),
+                precipitation_in_hr=cp.get("precipitation_in_hr", 0.0),
+                snowfall_in_hr=cp.get("snowfall_in_hr", 0.0),
+                weathercode=cp.get("weathercode", 0),
+                wind_risk=cp.get("wind_risk", "Low"),
+                rain_risk=cp.get("rain_risk", "Low"),
+                snow_risk=cp.get("snow_risk", "Low"),
+                risk_level=cp.get("risk_level", "Low"),
             )
+            for idx, cp in enumerate(r["checkpoints"])
+        ]
         Checkpoint.objects.bulk_create(cp_objs)
 
     return query
@@ -102,18 +100,7 @@ def _save_query(
 
 @api_view(["POST"])
 def plan_routes_view(request: Request) -> Response:
-    """
-    POST /api/routes/plan/
-
-    Body:
-        origin              : str
-        destination         : str
-        departure_datetime  : ISO 8601
-        load_weight_lbs     : float  (optional, default 0)
-        checkpoint_interval : 10|25|50  (optional, default 25)
-
-    Returns up to 3 route alternatives with weather + risk per checkpoint.
-    """
+    """POST /api/routes/plan/ — Returns up to 3 routes with weather + risk per checkpoint."""
     serializer = RoutePlanRequestSerializer(data=request.data)
     if not serializer.is_valid():
         return Response(
@@ -140,9 +127,13 @@ def plan_routes_view(request: Request) -> Response:
 
     load_lbs = data.get("load_weight_lbs", 0.0)
 
-    # 2. Enrich every route's checkpoints with weather + risk
+    # 2. Enrich checkpoints across all routes in a single deduplicated pass
+    all_checkpoints = [
+        cp for route in routing_result["routes"] for cp in route["checkpoints"]
+    ]
+    enrich_checkpoints_with_weather(all_checkpoints)
+
     for route in routing_result["routes"]:
-        enrich_checkpoints_with_weather(route["checkpoints"])
         enrich_checkpoints_with_risk(route["checkpoints"], load_weight_lbs=load_lbs)
         route["overall_risk_level"] = route_overall_risk(route["checkpoints"])
 
