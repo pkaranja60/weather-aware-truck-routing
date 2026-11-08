@@ -162,20 +162,23 @@ REST_FRAMEWORK = {
 }
 
 CORS_ALLOWED_ORIGINS = []
-cors_all = os.getenv("CORS_ALLOW_ALL_ORIGINS", "")
-cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", "")
-raw_origins = f"{cors_origins},{cors_all}" if cors_all not in ("True", "False", "1", "0", "") else cors_origins
 
-if raw_origins.strip(","):
-    cleaned = []
-    for o in [x.strip() for x in raw_origins.split(",") if x.strip() and x not in ("True", "False", "1", "0")]:
-        if not o.startswith(("http://", "https://")):
-            o = f"http://{o}"
-        cleaned.append(o.rstrip("/"))
-    CORS_ALLOWED_ORIGINS = list(dict.fromkeys(cleaned))
-    CORS_ALLOW_ALL_ORIGINS = False
-else:
+if DEBUG:
     CORS_ALLOW_ALL_ORIGINS = True
+    CORS_PREFLIGHT_MAX_AGE = 0
+else:
+    CORS_PREFLIGHT_MAX_AGE = 86400
+    cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", "")
+    if cors_origins:
+        cleaned = []
+        for o in [x.strip() for x in cors_origins.split(",") if x.strip()]:
+            if not o.startswith(("http://", "https://")):
+                o = f"https://{o}"
+            cleaned.append(o.rstrip("/"))
+        CORS_ALLOWED_ORIGINS = list(dict.fromkeys(cleaned))
+        CORS_ALLOW_ALL_ORIGINS = False
+    else:
+        CORS_ALLOW_ALL_ORIGINS = True
 
 # Open-Meteo (free, no key needed)
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"

@@ -15,9 +15,7 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-KMH_TO_MPH = 0.621371
-MM_TO_IN = 0.0393701
-CM_TO_IN = 0.393701
+KMH_TO_MPH, MM_TO_IN, CM_TO_IN = 0.621371, 0.0393701, 0.393701
 
 HOURLY_PARAMS = {
     "hourly": "windspeed_10m,precipitation,snowfall,weathercode",
@@ -81,10 +79,8 @@ def _closest_index(times: list[str], target_iso: str) -> int:
 
 def _zero_weather() -> dict:
     return {
-        "wind_speed_mph": 0.0,
-        "precipitation_in_hr": 0.0,
-        "snowfall_in_hr": 0.0,
-        "weathercode": 0,
+        "wind_speed_mph": 0.0, "precipitation_in_hr": 0.0,
+        "snowfall_in_hr": 0.0, "weathercode": 0,
     }
 
 
@@ -128,7 +124,16 @@ def get_route_forecast_48h(lat: float, lon: float, departure_iso: str) -> list[d
     data = _fetch_open_meteo(lat, lon)
     hourly = _parse_hourly(data)
     if not hourly["time"]:
-        return []
+        dep_clean = departure_iso.replace("Z", "+00:00")
+        dep_dt = datetime.fromisoformat(dep_clean)
+        return [
+            {
+                "hour_offset": offset,
+                "time_iso": (dep_dt + timedelta(hours=offset)).strftime("%Y-%m-%dT%H:%M"),
+                **_zero_weather(),
+            }
+            for offset in range(49)
+        ]
 
     dep_idx = _closest_index(hourly["time"], departure_iso)
     result = []
