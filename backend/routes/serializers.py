@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from rest_framework import serializers
 from .models import RouteQuery, Route, Checkpoint
 
@@ -15,6 +16,16 @@ class RoutePlanRequestSerializer(serializers.Serializer):
         if attrs["origin"].strip().lower() == attrs["destination"].strip().lower():
             raise serializers.ValidationError(
                 "Origin and destination cannot be the same."
+            )
+        now = datetime.now(timezone.utc)
+        dep = attrs["departure_datetime"]
+        if dep < now - timedelta(hours=2):
+            raise serializers.ValidationError(
+                {"departure_datetime": "Departure time cannot be in the past."}
+            )
+        if dep > now + timedelta(days=14):
+            raise serializers.ValidationError(
+                {"departure_datetime": "Departure time must be within 14 days (weather forecast limit)."}
             )
         return attrs
 

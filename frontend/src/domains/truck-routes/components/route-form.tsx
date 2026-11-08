@@ -1,6 +1,6 @@
 import { Loader2 } from "lucide-react";
 import type React from "react";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,7 +12,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { routesService } from "../services/routes.service";
-import { validateRoutePlanRequest } from "../validation/route-plan.validation";
+import {
+  toLocalInputDate,
+  validateRoutePlanRequest,
+} from "../validation/route-plan.validation";
 
 interface RouteFormProps {
   onSuccess: (queryId: string) => void;
@@ -27,6 +30,14 @@ export function RouteForm({ onSuccess }: RouteFormProps) {
   const [departure, setDeparture] = useState("");
   const [weight, setWeight] = useState("");
   const [interval, setInterval] = useState<"10" | "25" | "50">("25");
+
+  const { minDate, maxDate } = useMemo(() => {
+    const now = new Date();
+    return {
+      minDate: toLocalInputDate(now),
+      maxDate: toLocalInputDate(new Date(now.getTime() + 14 * 86_400_000)),
+    };
+  }, []);
 
   const handleOriginChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => setOrigin(e.target.value),
@@ -45,7 +56,7 @@ export function RouteForm({ onSuccess }: RouteFormProps) {
     []
   );
   const handleIntervalChange = useCallback((val: "10" | "25" | "50" | null) => {
-    if (val === "10" || val === "25" || val === "50") {
+    if (val) {
       setInterval(val);
     }
   }, []);
@@ -124,11 +135,16 @@ export function RouteForm({ onSuccess }: RouteFormProps) {
         <Label htmlFor="departure">Departure Date & Time</Label>
         <Input
           id="departure"
+          max={maxDate}
+          min={minDate}
           onChange={handleDepartureChange}
           required
           type="datetime-local"
           value={departure}
         />
+        <p className="text-muted-foreground text-xs">
+          Weather forecast available up to 14 days in advance
+        </p>
       </div>
 
       <div className="space-y-1.5">

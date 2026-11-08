@@ -34,10 +34,29 @@ describe("route plan validation", () => {
       validateRoutePlanRequest({
         origin: "Chicago, IL",
         destination: "Columbus, OH",
-        departure_datetime: new Date().toISOString(),
+        departure_datetime: new Date(Date.now() + 3600 * 1000).toISOString(),
         load_weight_lbs: 20_000,
         checkpoint_interval: 25,
       })
     ).toBeNull();
+  });
+
+  it("rejects departure dates in the past or beyond 14 days", () => {
+    const past = new Date(Date.now() - 3 * 3600 * 1000).toISOString();
+    const future = new Date(Date.now() + 15 * 86_400 * 1000).toISOString();
+    expect(
+      validateRoutePlanRequest({
+        origin: "Chicago, IL",
+        destination: "Columbus, OH",
+        departure_datetime: past,
+      })
+    ).toContain("past");
+    expect(
+      validateRoutePlanRequest({
+        origin: "Chicago, IL",
+        destination: "Columbus, OH",
+        departure_datetime: future,
+      })
+    ).toContain("14 days");
   });
 });

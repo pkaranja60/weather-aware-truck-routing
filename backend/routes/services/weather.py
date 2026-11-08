@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 from django.conf import settings
@@ -31,7 +31,7 @@ CM_TO_IN = 0.393701
 HOURLY_PARAMS = {
     "hourly": "windspeed_10m,precipitation,snowfall,weathercode",
     "windspeed_unit": "kmh",
-    "forecast_days": 3,
+    "forecast_days": 16,
     "timezone": "UTC",
 }
 
@@ -135,15 +135,23 @@ def get_route_forecast_48h(lat: float, lon: float, departure_iso: str) -> list[d
 
     dep_idx = _closest_index(hourly["time"], departure_iso)
     result = []
+    max_idx = len(hourly["time"]) - 1
     for offset in range(49):
-        idx = dep_idx + offset
-        if idx >= len(hourly["time"]):
-            break
+        target_idx = dep_idx + offset
+        idx = min(target_idx, max_idx)
         wx = _extract_at_index(hourly, idx)
+
+        if target_idx <= max_idx:
+            time_iso = hourly["time"][idx]
+        else:
+            last_dt = datetime.fromisoformat(hourly["time"][max_idx])
+            extrapolated_dt = last_dt + timedelta(hours=(target_idx - max_idx))
+            time_iso = extrapolated_dt.strftime("%Y-%m-%dT%H:%M")
+
         result.append(
             {
                 "hour_offset": offset,
-                "time_iso": hourly["time"][idx],
+                "time_iso": time_iso,
                 **wx,
             }
         )

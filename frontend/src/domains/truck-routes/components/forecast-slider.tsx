@@ -91,6 +91,8 @@ export function ForecastSlider({
     minute: "2-digit",
   });
 
+  const isSingleSlice = forecast.length <= 1;
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -106,7 +108,8 @@ export function ForecastSlider({
       <div className="space-y-1.5">
         <Slider
           className="w-full"
-          max={Math.max(0, forecast.length - 1)}
+          disabled={isSingleSlice}
+          max={Math.max(1, forecast.length - 1)}
           min={0}
           onValueChange={handleValueChange}
           step={1}
@@ -145,8 +148,9 @@ export function ForecastSlider({
       </p>
 
       <p className="text-[10px] leading-tight text-slate-400">
-        Checkpoint colors update with this slider — each point accounts for its
-        travel time.
+        {isSingleSlice
+          ? "Hourly projection reaches the limit of the available meteorological model."
+          : "Checkpoint colors update with this slider — each point accounts for its travel time."}
       </p>
     </div>
   );
