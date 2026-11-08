@@ -1,6 +1,17 @@
 import type { PlanRouteRequest, RouteQuery } from "../types";
 
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000/api";
+const TRAILING_SLASH_RE = /\/+$/u;
+
+function resolveApiBase(): string {
+  const envUrl = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
+  if (!envUrl) {
+    return "http://localhost:8000/api";
+  }
+  const clean = envUrl.replace(TRAILING_SLASH_RE, "");
+  return clean.endsWith("/api") ? clean : `${clean}/api`;
+}
+
+const API_BASE = resolveApiBase();
 
 async function create(payload: PlanRouteRequest): Promise<RouteQuery> {
   const response = await fetch(`${API_BASE}/routes/plan/`, {
