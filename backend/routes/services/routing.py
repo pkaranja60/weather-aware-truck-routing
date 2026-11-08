@@ -25,6 +25,8 @@ from typing import List, Tuple
 import requests
 from django.conf import settings
 
+from .geocoding import geocode
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_INTERVAL = 25
@@ -32,45 +34,6 @@ METERS_PER_MILE = 1609.344
 AVG_TRUCK_SPEED_MPH = 55.0
 NOMINATIM_DELAY = 1.1  # seconds between geocode calls (ToS)
 NUM_ROUTES = 3
-
-
-# ── Geocoding ─────────────────────────────────────────────────────────────────
-
-
-def geocode(address: str) -> dict:
-    """
-    Returns {"lat", "lon", "display_name"}.
-    Raises ValueError on failure.
-    """
-    headers = {
-        "User-Agent": getattr(settings, "NOMINATIM_USER_AGENT", "SpotterApp/1.0")
-    }
-    params = {
-        "q": address,
-        "format": "json",
-        "limit": 1,
-    }
-    try:
-        resp = requests.get(
-            settings.NOMINATIM_URL, params=params, headers=headers, timeout=10
-        )
-        resp.raise_for_status()
-        results = resp.json()
-    except requests.RequestException as exc:
-        raise ValueError(f"Geocoding failed for '{address}': {exc}") from exc
-
-    if not results:
-        raise ValueError(
-            f"Could not find '{address}'. "
-            "Try including the state or country, e.g. 'Los Angeles, CA' or 'Chicago, IL, USA'."
-        )
-
-    r = results[0]
-    return {
-        "lat": float(r["lat"]),
-        "lon": float(r["lon"]),
-        "display_name": r.get("display_name", address),
-    }
 
 
 # ── Geometry helpers ──────────────────────────────────────────────────────────
