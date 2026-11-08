@@ -1,4 +1,12 @@
-import type { RiskLevel } from "../types";
+import type { Checkpoint, ForecastSlice, RiskLevel } from "../types";
+
+export const RISK_LEVELS: readonly RiskLevel[] = [
+  "Low",
+  "Moderate",
+  "High",
+  "Severe",
+  "No Travel",
+];
 
 export const RISK_COLOR: Record<RiskLevel, string> = {
   Low: "#22c55e",
@@ -24,6 +32,14 @@ export const RISK_TEXT: Record<RiskLevel, string> = {
   "No Travel": "text-red-950",
 };
 
+export const RISK_RADIUS: Record<RiskLevel, number> = {
+  Low: 6,
+  Moderate: 8,
+  High: 11,
+  Severe: 14,
+  "No Travel": 17,
+};
+
 export const ROUTE_COLOR = ["#3b82f6", "#8b5cf6", "#06b6d4"];
 
 export function calculateForecastRisk(
@@ -44,6 +60,68 @@ export function calculateForecastRisk(
     return "Moderate";
   }
   return "Low";
+}
+
+export function maxRisk(a: RiskLevel, b: RiskLevel): RiskLevel {
+  const ia = Math.max(RISK_LEVELS.indexOf(a), 0);
+  const ib = Math.max(RISK_LEVELS.indexOf(b), 0);
+  return RISK_LEVELS[Math.max(ia, ib)] ?? "Low";
+}
+
+export function countHazardRisk(
+  checkpoints: Checkpoint[],
+  field: "wind_risk" | "rain_risk" | "snow_risk"
+): Record<RiskLevel, number> {
+  const counts = {} as Record<RiskLevel, number>;
+  for (const level of RISK_LEVELS) {
+    counts[level] = 0;
+  }
+  for (const cp of checkpoints) {
+    const level = cp[field];
+    if (level in counts) {
+      counts[level] += 1;
+    }
+  }
+  return counts;
+}
+
+export function getWorstHazardRisk(
+  checkpoints: Checkpoint[],
+  field: "wind_risk" | "rain_risk" | "snow_risk"
+): RiskLevel {
+  const counts = countHazardRisk(checkpoints, field);
+  for (let i = RISK_LEVELS.length - 1; i >= 0; i -= 1) {
+    const lvl = RISK_LEVELS[i];
+    if (lvl && counts[lvl] > 0) {
+      return lvl;
+    }
+  }
+  return "Low";
+}
+
+export function getCheckpointRisk(
+  cp: Checkpoint,
+  forecast48h: ForecastSlice[],
+  forecastHour: number
+): RiskLevel {
+  if (forecastHour === 0 || forecast48h.length === 0) {
+    return cp.risk_level;
+  }
+
+  const targetOffset = Math.round(forecastHour + cp.hours_from_departure);
+  const slice =
+    forecast48h.find((f: ForecastSlice) => f.hour_offset === targetOffset) ??
+    forecast48h.at(-1);
+
+  if (!slice) {
+    return cp.risk_level;
+  }
+
+  return calculateForecastRisk(
+    slice.wind_speed_mph,
+    slice.precipitation_in_hr,
+    slice.snowfall_in_hr
+  );
 }
 
 export function formatDriveHours(hours: number): string {

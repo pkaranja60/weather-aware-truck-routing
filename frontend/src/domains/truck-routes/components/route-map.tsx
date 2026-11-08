@@ -1,4 +1,5 @@
 import "leaflet/dist/leaflet.css";
+import { Fragment } from "react";
 import {
   CircleMarker,
   MapContainer,
@@ -6,18 +7,10 @@ import {
   TileLayer,
   Tooltip,
 } from "react-leaflet";
-import {
-  calculateForecastRisk,
-  RISK_COLOR,
-  ROUTE_COLOR,
-} from "../services/risk.calculation";
-import type {
-  Checkpoint,
-  ForecastSlice,
-  RiskLevel,
-  Route,
-  RouteQuery,
-} from "../types";
+import { ROUTE_COLOR } from "../services/risk.calculation";
+import type { RouteQuery } from "../types";
+import { RouteMapCheckpoints } from "./route-map-checkpoints";
+import { RouteMapHeatSegments } from "./route-map-heat-segments";
 
 interface RouteMapProps {
   forecastHour: number;
@@ -31,9 +24,6 @@ export function RouteMap({
   forecastHour,
 }: RouteMapProps) {
   const center: [number, number] = [query.origin_lat, query.origin_lon];
-  const activeRoute = query.routes.find(
-    (r: Route) => r.route_id === selectedRoute
-  );
 
   return (
     <MapContainer
@@ -47,99 +37,81 @@ export function RouteMap({
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
 
-      {query.routes.map((route: Route, idx: number) => {
+      {query.routes.map((route, idx) => {
         const isSelected = route.route_id === selectedRoute;
         const positions = route.geometry.coordinates.map(
-          ([lon, lat]: [number, number]): [number, number] => [lat, lon]
+          ([lon, lat]) => [lat, lon] as [number, number]
         );
 
         return (
-          <Polyline
-            key={route.route_id}
-            pathOptions={{
-              color: ROUTE_COLOR[idx] ?? "#3b82f6",
-              weight: isSelected ? 6 : 3,
-              opacity: isSelected ? 1 : 0.4,
-            }}
-            positions={positions}
-          />
-        );
-      })}
+          <Fragment key={route.route_id}>
+            {isSelected ? (
+              <RouteMapHeatSegments
+                checkpoints={route.checkpoints}
+                forecast48h={route.forecast_48h}
+                forecastHour={forecastHour}
+              />
+            ) : null}
 
-      {activeRoute?.checkpoints.map((cp: Checkpoint) => {
-        const forecast: ForecastSlice | undefined =
-          activeRoute.forecast_48h.find(
-            (f: ForecastSlice) => f.hour_offset === forecastHour
-          );
+            {isSelected ? (
+              <Polyline
+                pathOptions={{
+                  color: ROUTE_COLOR[idx] ?? "#3b82f6",
+                  opacity: 0.18,
+                  weight: 16,
+                }}
+                positions={positions}
+              />
+            ) : null}
 
-        const riskLevel: RiskLevel =
-          forecastHour === 0 || !forecast
-            ? cp.risk_level
-            : calculateForecastRisk(
-                forecast.wind_speed_mph,
-                forecast.precipitation_in_hr,
-                forecast.snowfall_in_hr
-              );
+            <Polyline
+              pathOptions={{
+                color: ROUTE_COLOR[idx] ?? "#3b82f6",
+                dashArray: isSelected ? undefined : "10 6",
+                opacity: isSelected ? 1 : 0.35,
+                weight: isSelected ? 5 : 2.5,
+              }}
+              positions={positions}
+            />
 
-        return (
-          <CircleMarker
-            center={[cp.lat, cp.lon]}
-            key={cp.index}
-            pathOptions={{
-              color: "#fff",
-              weight: 1.5,
-              fillColor: RISK_COLOR[riskLevel],
-              fillOpacity: 0.9,
-            }}
-            radius={6}
-          >
-            <Tooltip>
-              <div className="space-y-0.5 text-xs">
-                <p className="font-semibold">
-                  {cp.distance_from_start_miles.toFixed(0)} mi
-                </p>
-                <p>
-                  Risk: <strong>{riskLevel}</strong>
-                </p>
-                <p>Wind: {cp.wind_speed_mph.toFixed(1)} mph</p>
-                <p>Rain: {cp.precipitation_in_hr.toFixed(3)} in/hr</p>
-                <p>Snow: {cp.snowfall_in_hr.toFixed(3)} in/hr</p>
-                <p className="text-gray-500">
-                  ETA: {new Date(cp.eta_iso).toLocaleTimeString()}
-                </p>
-              </div>
-            </Tooltip>
-          </CircleMarker>
+            {isSelected ? (
+              <RouteMapCheckpoints
+                checkpoints={route.checkpoints}
+                forecast48h={route.forecast_48h}
+                forecastHour={forecastHour}
+              />
+            ) : null}
+          </Fragment>
         );
       })}
 
       <CircleMarker
         center={[query.origin_lat, query.origin_lon]}
         pathOptions={{
-          color: "#1d4ed8",
+          color: "#1e3a8a",
           fillColor: "#3b82f6",
           fillOpacity: 1,
-          weight: 2,
+          weight: 3,
         }}
-        radius={8}
+        radius={10}
       >
-        <Tooltip direction="top" permanent>
-          Origin
+        <Tooltip direction="top" offset={[0, -12]} permanent>
+          <span className="text-xs font-semibold">Origin</span>
         </Tooltip>
       </CircleMarker>
 
       <CircleMarker
         center={[query.destination_lat, query.destination_lon]}
         pathOptions={{
-          color: "#166534",
+          color: "#14532d",
           fillColor: "#22c55e",
           fillOpacity: 1,
-          weight: 2,
+          weight: 3,
         }}
-        radius={8}
+        radius={10}
       >
-        <Tooltip direction="top" permanent>
-          Destination
+        <Tooltip direction="top" offset={[0, -12]} permanent>
+          <span className="text-xs font-semibold">Destination</span>
         </Tooltip>
       </CircleMarker>
     </MapContainer>

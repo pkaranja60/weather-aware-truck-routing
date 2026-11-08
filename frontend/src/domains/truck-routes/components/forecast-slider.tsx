@@ -1,8 +1,54 @@
 import { useCallback } from "react";
 import { Slider } from "@/components/ui/slider";
-import { calculateForecastRisk } from "../services/risk.calculation";
-import type { ForecastSlice } from "../types";
+import {
+  calculateForecastRisk as forecastRisk,
+  RISK_COLOR,
+} from "../services/risk.calculation";
+import type { ForecastSlice, RiskLevel } from "../types";
 import { RiskBadge } from "./risk-badge";
+
+function wxDescription(code: number): string {
+  if (code === 0) {
+    return "Clear sky";
+  }
+  if (code <= 3) {
+    return "Partly cloudy";
+  }
+  if (code <= 9) {
+    return "Foggy";
+  }
+  if (code <= 19) {
+    return "Drizzle";
+  }
+  if (code <= 29) {
+    return "Rain";
+  }
+  if (code <= 39) {
+    return "Dust/sand";
+  }
+  if (code <= 49) {
+    return "Fog";
+  }
+  if (code <= 59) {
+    return "Drizzle";
+  }
+  if (code <= 69) {
+    return "Rain";
+  }
+  if (code <= 79) {
+    return "Snow";
+  }
+  if (code <= 84) {
+    return "Rain showers";
+  }
+  if (code <= 94) {
+    return "Snow showers";
+  }
+  if (code <= 99) {
+    return "Thunderstorm";
+  }
+  return "Unknown";
+}
 
 interface ForecastSliderProps {
   forecast: ForecastSlice[];
@@ -31,64 +77,101 @@ export function ForecastSlider({
     return null;
   }
 
-  const risk = calculateForecastRisk(
+  const risk = forecastRisk(
     slice.wind_speed_mph,
     slice.precipitation_in_hr,
     slice.snowfall_in_hr
   );
 
+  const timeLabel = new Date(`${slice.time_iso}Z`).toLocaleString([], {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
   return (
-    <div className="bg-muted/40 space-y-3 rounded-lg border p-4">
+    <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-sm font-medium">Forecast Preview</p>
-        <span className="text-muted-foreground text-xs">
-          {new Date(`${slice.time_iso}Z`).toLocaleString([], {
-            month: "short",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-        </span>
+        <div>
+          <p className="text-xs font-semibold text-slate-700">
+            {hour === 0 ? "Departure conditions" : `+${hour}h from departure`}
+          </p>
+          <p className="mt-0.5 text-xs text-slate-400">{timeLabel}</p>
+        </div>
+        <RiskBadge level={risk} />
       </div>
 
-      <Slider
-        className="w-full"
-        max={Math.max(0, forecast.length - 1)}
-        min={0}
-        onValueChange={handleValueChange}
-        step={1}
-        value={[hour]}
-      />
-
-      <div className="text-muted-foreground flex items-center justify-between text-xs">
-        <span>Now</span>
-        <span>+{hour}h from departure</span>
-        <span>+48h</span>
+      <div className="space-y-1.5">
+        <Slider
+          className="w-full"
+          max={Math.max(0, forecast.length - 1)}
+          min={0}
+          onValueChange={handleValueChange}
+          step={1}
+          value={[hour]}
+        />
+        <div className="flex justify-between text-[10px] text-slate-400">
+          <span>Now</span>
+          <span>+24h</span>
+          <span>+48h</span>
+        </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-3 pt-1">
-        <Stat label="Risk">
-          <RiskBadge level={risk} />
-        </Stat>
-        <Stat label="Wind">{slice.wind_speed_mph.toFixed(1)} mph</Stat>
-        <Stat label="Rain">{slice.precipitation_in_hr.toFixed(3)} in/hr</Stat>
-        <Stat label="Snow">{slice.snowfall_in_hr.toFixed(3)} in/hr</Stat>
+      <div className="grid grid-cols-3 gap-2">
+        <StatBox
+          label="Wind"
+          risk={forecastRisk(slice.wind_speed_mph, 0, 0)}
+          unit="mph"
+          value={slice.wind_speed_mph.toFixed(1)}
+        />
+        <StatBox
+          label="Rain"
+          risk={forecastRisk(0, slice.precipitation_in_hr, 0)}
+          unit="in/hr"
+          value={slice.precipitation_in_hr.toFixed(3)}
+        />
+        <StatBox
+          label="Snow"
+          risk={forecastRisk(0, 0, slice.snowfall_in_hr)}
+          unit="in/hr"
+          value={slice.snowfall_in_hr.toFixed(3)}
+        />
       </div>
+
+      <p className="text-center text-xs text-slate-500">
+        {wxDescription(slice.weathercode)}
+      </p>
+
+      <p className="text-[10px] leading-tight text-slate-400">
+        Checkpoint colors update with this slider — each point accounts for its
+        travel time.
+      </p>
     </div>
   );
 }
 
-function Stat({
+function StatBox({
   label,
-  children,
+  value,
+  unit,
+  risk,
 }: {
   label: string;
-  children: React.ReactNode;
+  value: string;
+  unit: string;
+  risk: RiskLevel;
 }) {
+  const color = risk === "Low" ? "#64748b" : RISK_COLOR[risk];
+
   return (
-    <div className="text-center">
-      <p className="text-muted-foreground mb-1 text-xs">{label}</p>
-      <p className="text-sm font-medium">{children}</p>
+    <div className="rounded-md border border-slate-100 bg-slate-50 p-2 text-center">
+      <p className="mb-1 text-[10px] text-slate-400">{label}</p>
+      <p className="text-sm leading-none font-bold" style={{ color }}>
+        {value}
+      </p>
+      <p className="mt-0.5 text-[10px] text-slate-400">{unit}</p>
     </div>
   );
 }
