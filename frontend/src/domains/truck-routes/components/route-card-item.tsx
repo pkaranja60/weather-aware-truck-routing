@@ -67,20 +67,25 @@ export function RouteCardItem({
       onClick={handleClick}
     >
       <CardHeader className="px-4 pb-2">
-        <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="flex min-w-0 items-center gap-1.5 text-sm font-semibold">
             <span
-              className="inline-block h-1.5 w-4 rounded-full"
+              className="inline-block h-1.5 w-4 shrink-0 rounded-full"
               style={{ backgroundColor: ROUTE_COLOR[idx] ?? "#3b82f6" }}
             />
-            Route {route.route_id}
+            <span className="shrink-0 whitespace-nowrap">
+              Route {route.route_id}
+            </span>
             {route.is_recommended ? (
-              <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+              <span className="shrink-0 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium whitespace-nowrap text-blue-700">
                 ★ Best
               </span>
             ) : null}
           </CardTitle>
-          <RiskBadge level={route.overall_risk_level} />
+          <RiskBadge
+            className="shrink-0 whitespace-nowrap"
+            level={route.overall_risk_level}
+          />
         </div>
       </CardHeader>
 
