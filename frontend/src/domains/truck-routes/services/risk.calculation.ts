@@ -47,13 +47,13 @@ export function calculateForecastRisk(
   precipIn: number,
   snowIn: number
 ): RiskLevel {
-  if (windMph >= 55 || precipIn >= 1.0 || snowIn >= 4.0) {
+  if (windMph >= 55 || precipIn > 1.0 || snowIn > 3.0) {
     return "No Travel";
   }
   if (windMph >= 45 || precipIn >= 0.5 || snowIn >= 2.0) {
     return "Severe";
   }
-  if (windMph >= 35 || precipIn >= 0.3 || snowIn >= 1.0) {
+  if (windMph >= 35 || precipIn >= 0.25 || snowIn >= 1.0) {
     return "High";
   }
   if (windMph >= 25 || precipIn >= 0.1 || snowIn >= 0.5) {
@@ -99,13 +99,31 @@ export function getWorstHazardRisk(
   return "Low";
 }
 
-export function getCheckpointRisk(
+export interface CheckpointWeatherDisplay {
+  precipitation_in_hr: number;
+  rain_risk: RiskLevel;
+  risk_level: RiskLevel;
+  snow_risk: RiskLevel;
+  snowfall_in_hr: number;
+  wind_risk: RiskLevel;
+  wind_speed_mph: number;
+}
+
+export function getCheckpointDisplayWeather(
   cp: Checkpoint,
   forecast48h: ForecastSlice[],
   forecastHour: number
-): RiskLevel {
+): CheckpointWeatherDisplay {
   if (forecastHour === 0 || forecast48h.length === 0) {
-    return cp.risk_level;
+    return {
+      wind_speed_mph: cp.wind_speed_mph,
+      precipitation_in_hr: cp.precipitation_in_hr,
+      snowfall_in_hr: cp.snowfall_in_hr,
+      wind_risk: cp.wind_risk,
+      rain_risk: cp.rain_risk,
+      snow_risk: cp.snow_risk,
+      risk_level: cp.risk_level,
+    };
   }
 
   const targetOffset = Math.round(forecastHour + cp.hours_from_departure);
@@ -114,14 +132,43 @@ export function getCheckpointRisk(
     forecast48h.at(-1);
 
   if (!slice) {
-    return cp.risk_level;
+    return {
+      wind_speed_mph: cp.wind_speed_mph,
+      precipitation_in_hr: cp.precipitation_in_hr,
+      snowfall_in_hr: cp.snowfall_in_hr,
+      wind_risk: cp.wind_risk,
+      rain_risk: cp.rain_risk,
+      snow_risk: cp.snow_risk,
+      risk_level: cp.risk_level,
+    };
   }
 
-  return calculateForecastRisk(
+  const wr = calculateForecastRisk(slice.wind_speed_mph, 0, 0);
+  const rr = calculateForecastRisk(0, slice.precipitation_in_hr, 0);
+  const sr = calculateForecastRisk(0, 0, slice.snowfall_in_hr);
+  const overall = calculateForecastRisk(
     slice.wind_speed_mph,
     slice.precipitation_in_hr,
     slice.snowfall_in_hr
   );
+
+  return {
+    wind_speed_mph: slice.wind_speed_mph,
+    precipitation_in_hr: slice.precipitation_in_hr,
+    snowfall_in_hr: slice.snowfall_in_hr,
+    wind_risk: wr,
+    rain_risk: rr,
+    snow_risk: sr,
+    risk_level: overall,
+  };
+}
+
+export function getCheckpointRisk(
+  cp: Checkpoint,
+  forecast48h: ForecastSlice[],
+  forecastHour: number
+): RiskLevel {
+  return getCheckpointDisplayWeather(cp, forecast48h, forecastHour).risk_level;
 }
 
 export function formatDriveHours(hours: number): string {

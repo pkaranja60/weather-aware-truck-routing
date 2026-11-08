@@ -17,17 +17,17 @@ Wind (mph):
 
 Rain (in/hr):
     Low       < 0.10
-    Moderate  0.10 – 0.29
-    High      0.30 – 0.49
-    Severe    0.50 – 0.99
-    No Travel ≥ 1.00
+    Moderate  0.10 – 0.25
+    High      0.25 – 0.50
+    Severe    0.50 – 1.00
+    No Travel > 1.00
 
 Snow (in/hr):
     Low       < 0.50
-    Moderate  0.50 – 0.99
-    High      1.00 – 1.99
-    Severe    2.00 – 3.99
-    No Travel ≥ 4.00
+    Moderate  0.50 – 1.00
+    High      1.00 – 2.00
+    Severe    2.00 – 3.00
+    No Travel > 3.00
 
 Overall risk = MAX(wind_risk, rain_risk, snow_risk)
 
@@ -69,11 +69,11 @@ def wind_risk(wind_mph: float) -> str:
 
 
 def rain_risk(precip_in_hr: float) -> str:
-    if precip_in_hr >= 1.00:
+    if precip_in_hr > 1.00:
         return "No Travel"
     if precip_in_hr >= 0.50:
         return "Severe"
-    if precip_in_hr >= 0.30:
+    if precip_in_hr >= 0.25:
         return "High"
     if precip_in_hr >= 0.10:
         return "Moderate"
@@ -81,7 +81,7 @@ def rain_risk(precip_in_hr: float) -> str:
 
 
 def snow_risk(snow_in_hr: float) -> str:
-    if snow_in_hr >= 4.00:
+    if snow_in_hr > 3.00:
         return "No Travel"
     if snow_in_hr >= 2.00:
         return "Severe"
@@ -168,17 +168,23 @@ def route_overall_risk(checkpoints: list[dict]) -> str:
 
 def pick_recommended_route(routes: list[dict]) -> int:
     """
-    Given a list of route dicts (each with 'route_id' and 'checkpoints'),
-    return the route_id of the recommended route:
-      1. Lowest overall risk
-      2. Shortest distance on a tie
+    Given a list of route dicts, return the route_id of the recommended route:
+      1. Fewest Severe miles / checkpoints
+      2. Fewest High miles / checkpoints
+      3. Lowest average risk score
+      4. Shortest travel time (duration_hours)
     """
 
     def sort_key(r: dict):
-        return (
-            _level_index(r.get("overall_risk_level", "Low")),
-            r.get("distance_miles", 0.0),
+        cps = r.get("checkpoints", [])
+        severe_count = sum(1 for cp in cps if cp.get("risk_level") == "Severe")
+        high_count = sum(1 for cp in cps if cp.get("risk_level") == "High")
+        avg_risk = (
+            sum(_level_index(cp.get("risk_level", "Low")) for cp in cps) / len(cps)
+            if cps
+            else 0.0
         )
+        return (severe_count, high_count, avg_risk, r.get("duration_hours", 0.0))
 
     best = min(routes, key=sort_key)
     return best["route_id"]

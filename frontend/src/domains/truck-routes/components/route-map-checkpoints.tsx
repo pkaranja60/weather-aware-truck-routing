@@ -1,7 +1,7 @@
 import { Fragment } from "react";
 import { CircleMarker, Tooltip } from "react-leaflet";
 import {
-  getCheckpointRisk,
+  getCheckpointDisplayWeather,
   RISK_COLOR,
   RISK_RADIUS,
 } from "../services/risk.calculation";
@@ -21,7 +21,8 @@ export function RouteMapCheckpoints({
   return (
     <>
       {checkpoints.map((cp) => {
-        const riskLevel = getCheckpointRisk(cp, forecast48h, forecastHour);
+        const wx = getCheckpointDisplayWeather(cp, forecast48h, forecastHour);
+        const riskLevel = wx.risk_level;
         const radius = RISK_RADIUS[riskLevel] ?? 6;
         const needsGlow = riskLevel === "Severe" || riskLevel === "No Travel";
 
@@ -64,22 +65,22 @@ export function RouteMapCheckpoints({
                   <div className="flex justify-between gap-4">
                     <span className="text-gray-500">Wind</span>
                     <span>
-                      {cp.wind_speed_mph.toFixed(1)} mph
-                      <span className="ml-1 opacity-60">({cp.wind_risk})</span>
+                      {wx.wind_speed_mph.toFixed(1)} mph
+                      <span className="ml-1 opacity-60">({wx.wind_risk})</span>
                     </span>
                   </div>
                   <div className="flex justify-between gap-4">
                     <span className="text-gray-500">Rain</span>
                     <span>
-                      {cp.precipitation_in_hr.toFixed(3)} in/hr
-                      <span className="ml-1 opacity-60">({cp.rain_risk})</span>
+                      {wx.precipitation_in_hr.toFixed(3)} in/hr
+                      <span className="ml-1 opacity-60">({wx.rain_risk})</span>
                     </span>
                   </div>
                   <div className="flex justify-between gap-4">
                     <span className="text-gray-500">Snow</span>
                     <span>
-                      {cp.snowfall_in_hr.toFixed(3)} in/hr
-                      <span className="ml-1 opacity-60">({cp.snow_risk})</span>
+                      {wx.snowfall_in_hr.toFixed(3)} in/hr
+                      <span className="ml-1 opacity-60">({wx.snow_risk})</span>
                     </span>
                   </div>
                   <p className="pt-0.5 text-gray-400">
