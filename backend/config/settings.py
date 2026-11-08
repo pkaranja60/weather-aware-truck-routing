@@ -15,10 +15,9 @@ from dotenv import load_dotenv
 import os
 import dj_database_url
 
-load_dotenv()
-
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
+load_dotenv()
 
 
 # Quick-start development settings - unsuitable for production
@@ -162,11 +161,18 @@ REST_FRAMEWORK = {
     "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
 }
 
-cors_origins = os.getenv("CORS_ALLOWED_ORIGINS")
-if cors_origins:
-    CORS_ALLOWED_ORIGINS = [
-        origin.strip() for origin in cors_origins.split(",") if origin.strip()
-    ]
+CORS_ALLOWED_ORIGINS = []
+cors_all = os.getenv("CORS_ALLOW_ALL_ORIGINS", "")
+cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", "")
+raw_origins = f"{cors_origins},{cors_all}" if cors_all not in ("True", "False", "1", "0", "") else cors_origins
+
+if raw_origins.strip(","):
+    cleaned = []
+    for o in [x.strip() for x in raw_origins.split(",") if x.strip() and x not in ("True", "False", "1", "0")]:
+        if not o.startswith(("http://", "https://")):
+            o = f"http://{o}"
+        cleaned.append(o.rstrip("/"))
+    CORS_ALLOWED_ORIGINS = list(dict.fromkeys(cleaned))
     CORS_ALLOW_ALL_ORIGINS = False
 else:
     CORS_ALLOW_ALL_ORIGINS = True
