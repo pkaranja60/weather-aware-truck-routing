@@ -10,9 +10,9 @@ The system is architected as a decoupled, domain-first monorepo consisting of a 
 
 ```mermaid
 flowchart LR
-    A["Frontend (React 19 / Vite / Tailwind v4)"] <-->|REST API (JSON)| B["Backend (Django REST Framework)"]
+    A["Frontend (React 19 / Vite / Tailwind v4)"] <-->|REST API| B["Backend (Django REST Framework)"]
     B <-->|Geocoding| C["Nominatim API"]
-    B <-->|Turn-by-turn & Alternatives| D["OSRM Routing Engine"]
+    B <-->|Turn-by-turn and Alternatives| D["OSRM Routing Engine"]
     B <-->|Timestamped Forecasts| E["Open-Meteo API"]
     B <-->|Persistence| F[("SQLite Database")]
 ```
